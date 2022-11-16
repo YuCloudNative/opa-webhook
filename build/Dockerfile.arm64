@@ -1,0 +1,15 @@
+FROM alpine:3.7
+
+RUN apk update \
+        && apk upgrade \
+        && apk add --no-cache bash \
+        bash-doc \
+        bash-completion \
+        && rm -rf /var/cache/apk/* \
+        && /bin/bash
+
+WORKDIR /app
+
+COPY ../output/bin/arm64/linux/opa-sidecar-webhook .
+
+ENTRYPOINT ["/app/opa-sidecar-webhook"]

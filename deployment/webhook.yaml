@@ -1,0 +1,131 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opa-istio
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opa-sidecar-webhook
+  namespace: opa-istio
+  labels:
+    app: opa-sidecar
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: opa-sidecar
+  template:
+    metadata:
+      labels:
+        app: opa-sidecar
+    spec:
+      containers:
+        - name: opa-sidecar-webhook
+          image: ccr-2ql0kyd9-pub.cnc.bj.baidubce.com/bms-mesh/opa-sidecar-webhook:1.6
+          imagePullPolicy: Always
+          args:
+            - -tlsCertFile=/ssl/cert.pem
+            - -tlsKeyFile=/ssl/key.pem
+            - -alsologtostderr
+            - -v=4
+            - 2>&1
+          volumeMounts:
+            - name: webhook-certs
+              mountPath: /ssl
+              readOnly: true
+      volumes:
+        - name: webhook-certs
+          secret:
+            secretName: opa-sidecar-webhook-certs
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opa-sidecar-webhook
+  namespace: opa-istio
+  labels:
+    app: opa-sidecar
+spec:
+  ports:
+    - port: 443
+      targetPort: 8443
+  selector:
+    app: opa-sidecar
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: opa-sidecar-webhook
+  labels:
+    app: opa-sidecar
+webhooks:
+  - name: namespace.opa-sidecar-webhook.csm
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: opa-sidecar-webhook
+        namespace: opa-istio
+        path: "/mutate"
+      caBundle: |-
+        {{caBundle}}
+    rules:
+      - operations: [ "CREATE" ]
+        apiGroups: [ "" ]
+        apiVersions: [ "v1" ]
+        resources: [ "pods" ]
+    admissionReviewVersions: [ "v1", "v1beta1" ]
+    sideEffects: None
+    timeoutSeconds: 30
+    namespaceSelector:
+      matchExpressions:
+        - key: csmopa-injection
+          operator: In
+          values:
+            - "enabled"
+  - name: object.opa-sidecar-webhook.csm
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: opa-sidecar-webhook
+        namespace: opa-istio
+        path: "/mutate"
+      caBundle: |-
+        LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURkRENDQWx5Z0F3SUJBZ0lVTzhkTWZ5cm9RRGxLVGoxcXRXYnM4MzF3VnRrd0RRWUpLb1pJaHZjTkFRRUwKQlFBd1VqRUxNQWtHQTFVRUJoTUNRVlV4RURBT0JnTlZCQWdUQjBWNFlXMXdiR1V4RWpBUUJnTlZCQWNUQ1UxbApiR0p2ZFhKdVpURVFNQTRHQTFVRUNoTUhSWGhoYlhCc1pURUxNQWtHQTFVRUN4TUNRMEV3SGhjTk1qSXdNakUzCk1ESTBNREF3V2hjTk1qY3dNakUyTURJME1EQXdXakJTTVFzd0NRWURWUVFHRXdKQlZURVFNQTRHQTFVRUNCTUgKUlhoaGJYQnNaVEVTTUJBR0ExVUVCeE1KVFdWc1ltOTFjbTVsTVJBd0RnWURWUVFLRXdkRmVHRnRjR3hsTVFzdwpDUVlEVlFRTEV3SkRRVENDQVNJd0RRWUpLb1pJaHZjTkFRRUJCUUFEZ2dFUEFEQ0NBUW9DZ2dFQkFOc0Z3bHU5CllxQmVWU3FGN29jcTA2aENRdGtpakVkOEptUER3elBRZDdEYVV0MDR4bHNzZE9LblJMcjE4UWZMZGxwYjF6RWkKbTBxNDZSbDhwU2JtZFBFeW1iem1CZlhMbTZPL2g5Qk0rZi9Zb0dEazBWUGhPQ2JtK0RxTUphTDA3bjQwQi91RwpEVGthNHJ4QXNYT1NDekNLd1I3MnFNYVVpdWJLeGtmWlNSYk4zNElzRWhnakJJRTluUEQxR0NFemdMNmVBa1dkCm1kU3pmVkV5aGVQZUwrUUNleXVDS1ZIVzdKcUxNbno4ZkdyckNGYTR6bE1BeUwwMHNpcCsxbUFjK2ZmbEZQMkkKK1RGKzVXazBYM1JyakhwUTlIZXB3SVhQamJrTFhXRHA2WldtZ0lPL3RCTlhlekFWTUhEOG1IYy9yNDEwaHBlMgovNS84bWlwT3FTQVpWMThDQXdFQUFhTkNNRUF3RGdZRFZSMFBBUUgvQkFRREFnRUdNQThHQTFVZEV3RUIvd1FGCk1BTUJBZjh3SFFZRFZSME9CQllFRkM0blIyTk9iUHhpYjYwZFRVMitUaC9leTRiRE1BMEdDU3FHU0liM0RRRUIKQ3dVQUE0SUJBUUEzWW81T0xKVWFWN0k4Z2RVRHlzdHZ1SVFYenRUSmF0cHAzUitQWWI3T1o3OGgyNXFsdHRyUwo5Ly9XMEtvMk9rNUJrcVgxTXpRMUFodFJMa0poaG5RRTVBWjloWUkzalVOWVhOZDdCWnA0bFhJZGxialBYRHkrCk1FcmF2WkFiaWdBelpHcVBCcUV5eVhmbjFjTU85VzZvRzl5TVZPVTZ5QUUzNW5lMXVDY08xUjlkQ3Exc3ZHZlEKYlhPWFZ3VUhKUkRnQ1Y3LzFoU1VEdE41d0xzZGhvQVRxL2tnZEdLOElvMGxwM1R6MG4vd0VVbUJkU09vNFphaApuR2VQbHh0ZWZ2a0l3N0pYamEyZis5cGFsOGhNOVVJY0VHY0ExZGlObDZraUMxaFFMalJ2eUExYWVHdGxoMmI0ClMyWkl3NEZMc3dPRUQzL1lxRk5JQkRUWW50WFRYbjNSCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+    rules:
+      - operations: [ "CREATE" ]
+        apiGroups: [ "" ]
+        apiVersions: [ "v1" ]
+        resources: [ "pods" ]
+    admissionReviewVersions: [ "v1", "v1beta1" ]
+    sideEffects: None
+    timeoutSeconds: 30
+    namespaceSelector:
+      matchExpressions:
+        - key: csmopa-injection
+          operator: NotIn
+          values:
+            - "enabled"
+    objectSelector:
+      matchExpressions:
+        - key: csmopa-injection
+          operator: In
+          values:
+            - "enabled"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: opa-sidecar-webhook-certs
+  namespace: opa-istio
+data:
+  key.pem: |-
+    {{key.pem}}
+  cert.pem: |-
+    {{cert.pem}}
+---
